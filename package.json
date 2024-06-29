@@ -1,0 +1,41 @@
+{
+  "name": "dsl-debugger",
+  "version": "1.0.0",
+  "description": "",
+  "main": "out/extension.js",
+  "scripts": {
+    "watch": "trash out && tsc -w -p ."
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thzt/dsl-debugger.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/thzt/dsl-debugger/issues"
+  },
+  "homepage": "https://github.com/thzt/dsl-debugger#readme",
+  "devDependencies": {
+    "@types/node": "^14.14.37",
+    "@types/vscode": "^1.66.0",
+    "@vscode/debugadapter": "^1.56.0",
+    "trash": "^8.1.1",
+    "typescript": "^4.6.3"
+  },
+  "engines": {
+    "vscode": "^1.66.0"
+  },
+  "activationEvents": [
+    "onDebugResolve:dsl"
+  ],
+  "contributes": {
+    "debuggers": [
+      {
+        "type": "dsl",
+        "label": "_"
+      }
+    ]
+  }
+}
