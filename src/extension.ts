@@ -22,21 +22,28 @@ class Session extends dap.LoggingDebugSession {
 
   private handlers = new dap.Handles<'locals' | 'globals' | 'test'>();
 
+  // 当前执行到的行数，为了模拟 step over 效果
+  private line: number = 1;
+
   public constructor() {
     super('file.name');
   }
 
+  // ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
   // DAP 事件
+
+  // ---- ---- ---- ---- ---- ----
+  // 点击进行调试
 
   // 1. 初始化
   protected initializeRequest(response: DebugProtocol.InitializeResponse, args: DebugProtocol.InitializeRequestArguments): void {
-    // debugger
+    // debugger;
     this.sendResponse(response);
     this.sendEvent(new dap.InitializedEvent());
   }
   // 2. debug 类型为 launch
   protected launchRequest(response: DebugProtocol.LaunchResponse, args: DebugProtocol.LaunchRequestArguments, request?: DebugProtocol.Request): void {
-    // debugger
+    // debugger;
     this.sendResponse(response);
 
     // // 调用栈 里可以有多个调试进程
@@ -45,7 +52,7 @@ class Session extends dap.LoggingDebugSession {
   }
   // 3. 获取调用栈里面的进程
   protected threadsRequest(response: DebugProtocol.ThreadsResponse, request?: DebugProtocol.Request): void {
-    // debugger
+    // debugger;
     response.body = {
       threads: [
         new dap.Thread(Session.threadId, 'thread 1'),
@@ -56,7 +63,7 @@ class Session extends dap.LoggingDebugSession {
   }
   // 4. 获取给定进程的 调用栈帧
   protected stackTraceRequest(response: DebugProtocol.StackTraceResponse, args: DebugProtocol.StackTraceArguments, request?: DebugProtocol.Request): void {
-    // debugger
+    // debugger;
     response.body = {
       stackFrames: [
         new dap.StackFrame(
@@ -66,7 +73,7 @@ class Session extends dap.LoggingDebugSession {
             'readme.dsl',
             '/Users/thzt/project/github.com/thzt/dsl-debugger/sampleWorkspace/readme.dsl',
           ),
-          1,  // 第一行
+          this.line++,  // 第一行（刚开始在第一行）
           1,  // 第一列
         ),
         new dap.StackFrame(  // 表明可以从别的文件调用过来
@@ -87,21 +94,21 @@ class Session extends dap.LoggingDebugSession {
   // 5. 获取给定栈帧的作用域分类
   protected scopesRequest(response: DebugProtocol.ScopesResponse, args: DebugProtocol.ScopesArguments, request?: DebugProtocol.Request): void {
     // 不同栈帧 args.frameId 可以有不同的分类，但一般为相同的分类
-    // debugger
+    // debugger;
     const localScopeReference = this.handlers.create('locals');
     const globalScopeReference = this.handlers.create('globals');
 
     response.body = {
       scopes: [
-        new dap.Scope('Locals', localScopeReference, true),
-        new dap.Scope('Globals', globalScopeReference, true),
+        new dap.Scope('Locals', localScopeReference, false),
+        new dap.Scope('Globals', globalScopeReference, true), // expensive:true 则默认不展开（展开才获取变量 variablesRequest）
       ],
     };
     this.sendResponse(response);
   }
   // 6. 获取不同栈帧分类的变量，这里拿不到栈帧信息，只有分类信息
   protected variablesRequest(response: DebugProtocol.VariablesResponse, args: DebugProtocol.VariablesArguments, request?: DebugProtocol.Request): void {
-    // debugger
+    // debugger;
     switch (this.handlers.get(args.variablesReference)) {
       case 'locals': {
         response.body = {
@@ -121,5 +128,20 @@ class Session extends dap.LoggingDebugSession {
       }
     }
     this.sendResponse(response);
+  }
+
+  // ---- ---- ---- ---- ---- ----
+  // 下一步 Stop Over
+
+  protected nextRequest(response: DebugProtocol.NextResponse, args: DebugProtocol.NextArguments, request?: DebugProtocol.Request): void {
+    // debugger;
+    this.sendResponse(response);
+    this.sendEvent(new dap.StoppedEvent('step', Session.threadId));  // 需要发送停止事件，不然不会停住
+
+    // 会再次按顺序调用
+    // 获取调试进程：threadsRequest
+    // 获取栈帧：stackTraceRequest
+    // 获取作用域：scopesRequest
+    // 获取变量：variablesRequest
   }
 }
