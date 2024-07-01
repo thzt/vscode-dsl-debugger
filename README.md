@@ -15,7 +15,8 @@ F5
 ```
 
 #### 2. 技术细节
-（1）package.json 中添加如下字段，则可以在调试时触发 Extension 执行。并且为 Extension 注册了 type 为 dsl 的 debugger 能力（launch.json 中可以添加 type 为 dsl 的配置了）。
+##### 2.1 Extension 编写
+（1）package.json 中添加如下字段，则可以在调试时触发 Extension 执行。并且为 Extension 注册了 `type` 为 `dsl` 的 debugger 能力（launch.json 中可以添加 `type` 为 `dsl` 的配置了），其中 `label` 必须有值。
 ```
 "engines": {
   "vscode": "^1.66.0"
@@ -48,7 +49,7 @@ F5
 }
 ```
 
-（2）Extension 激活时要注册 DebugAdapterDescriptorFactory，名字为 dsl，跟上面保持一致
+（2）Extension 激活时要注册 DebugAdapterDescriptorFactory，名字为 `dsl`，跟上面保持一致
 ```
 export const activate = (context: vscode.ExtensionContext) => {
   context.subscriptions.push(
@@ -60,7 +61,7 @@ export const activate = (context: vscode.ExtensionContext) => {
 };
 ```
 
-（3）DebugAdapterDescriptorFactory 中会 new 一个 Session，这个 Session 可以接收 DAP 事件
+（3）DebugAdapterDescriptorFactory 中会 new 一个 DebugSession，这个 `Session` 可以接收 DAP 事件
 ```
 class Factory implements vscode.DebugAdapterDescriptorFactory {
   createDebugAdapterDescriptor(session: vscode.DebugSession, executable: vscode.DebugAdapterExecutable): vscode.ProviderResult<vscode.DebugAdapterDescriptor> {
@@ -69,7 +70,8 @@ class Factory implements vscode.DebugAdapterDescriptorFactory {
 }
 ```
 
-（4）DAP 事件有很多
+##### 2.2 开始调试
+按 `F5` 会依次执行 `Session` 中的以下 DAP 事件，
 ```
 class Session extends dap.LoggingDebugSession {
   public constructor() {
@@ -92,4 +94,17 @@ class Session extends dap.LoggingDebugSession {
   protected variablesRequest(response: DebugProtocol.VariablesResponse, args: DebugProtocol.VariablesArguments, request?: DebugProtocol.Request): void {}
 
   ...
+```
+
+##### 2.3 Step Over
+Step Over 会再次触发 DAP 事件，
+```
+先触发：nextRequest。记得要发送一个停止事件
+protected nextRequest(response: DebugProtocol.NextResponse, args: DebugProtocol.NextArguments, request?: DebugProtocol.Request): void {}
+
+然后依次触发：
+- 获取调试进程：threadsRequest
+- 获取栈帧：stackTraceRequest（停在下一行是在这里设置的，获取栈帧的时候，会指定文件和行号）
+- 获取作用域：scopesRequest
+- 获取变量：variablesRequest
 ```
