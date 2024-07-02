@@ -1,3 +1,4 @@
+import * as path from 'path';
 import * as vscode from 'vscode';
 import * as dap from '@vscode/debugadapter';
 import { DebugProtocol } from '@vscode/debugprotocol';
@@ -64,6 +65,9 @@ class Session extends dap.LoggingDebugSession {
   // 4. 获取给定进程的 调用栈帧
   protected stackTraceRequest(response: DebugProtocol.StackTraceResponse, args: DebugProtocol.StackTraceArguments, request?: DebugProtocol.Request): void {
     // debugger;
+    const readmeFilePath = path.resolve(__dirname, '../sampleWorkspace/readme.dsl');
+    const callerFilePath = path.resolve(__dirname, '../sampleWorkspace/caller.dsl');
+
     response.body = {
       stackFrames: [
         new dap.StackFrame(
@@ -71,7 +75,7 @@ class Session extends dap.LoggingDebugSession {
           'frame1.name',  // 栈帧的名字
           new dap.Source(
             'readme.dsl',
-            '/Users/thzt/project/github.com/thzt/dsl-debugger/sampleWorkspace/readme.dsl',
+            readmeFilePath,
           ),
           this.line++,  // 第一行（刚开始在第一行）
           1,  // 第一列
@@ -80,10 +84,10 @@ class Session extends dap.LoggingDebugSession {
           1,
           'frame2.name',
           new dap.Source(
-            'readme.dsl',
-            '/Users/thzt/project/github.com/thzt/dsl-debugger/sampleWorkspace/caller.dsl',
+            'caller.dsl',
+            callerFilePath,
           ),
-          2,
+          3,
           1,
         ),
       ],

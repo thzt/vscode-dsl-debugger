@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.activate = void 0;
+const path = require("path");
 const vscode = require("vscode");
 const dap = require("@vscode/debugadapter");
 const activate = (context) => {
@@ -51,14 +52,16 @@ class Session extends dap.LoggingDebugSession {
     // 4. 获取给定进程的 调用栈帧
     stackTraceRequest(response, args, request) {
         // debugger;
+        const readmeFilePath = path.resolve(__dirname, '../sampleWorkspace/readme.dsl');
+        const callerFilePath = path.resolve(__dirname, '../sampleWorkspace/caller.dsl');
         response.body = {
             stackFrames: [
                 new dap.StackFrame(0, // 栈帧的 id
                 'frame1.name', // 栈帧的名字
-                new dap.Source('readme.dsl', '/Users/thzt/project/github.com/thzt/dsl-debugger/sampleWorkspace/readme.dsl'), this.line++, // 第一行（刚开始在第一行）
+                new dap.Source('readme.dsl', readmeFilePath), this.line++, // 第一行（刚开始在第一行）
                 1),
                 new dap.StackFrame(// 表明可以从别的文件调用过来
-                1, 'frame2.name', new dap.Source('readme.dsl', '/Users/thzt/project/github.com/thzt/dsl-debugger/sampleWorkspace/caller.dsl'), 2, 1),
+                1, 'frame2.name', new dap.Source('caller.dsl', callerFilePath), 3, 1),
             ],
             totalFrames: 2,
         };
