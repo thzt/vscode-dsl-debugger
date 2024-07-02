@@ -1,5 +1,5 @@
 {
-  "name": "dsl-debugger",
+  "name": "vscode-debugger",
   "version": "1.0.0",
   "description": "",
   "main": "out/extension.js",
@@ -8,15 +8,15 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/thzt/dsl-debugger.git"
+    "url": "git+https://github.com/thzt/vscode-debugger.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/thzt/dsl-debugger/issues"
+    "url": "https://github.com/thzt/vscode-debugger/issues"
   },
-  "homepage": "https://github.com/thzt/dsl-debugger#readme",
+  "homepage": "https://github.com/thzt/vscode-debugger#readme",
   "devDependencies": {
     "@types/node": "^14.14.37",
     "@types/vscode": "^1.66.0",

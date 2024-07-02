@@ -1,4 +1,4 @@
-### dsl-debugger
+### vscode-debugger
 
 #### 1. 调试方式
 
