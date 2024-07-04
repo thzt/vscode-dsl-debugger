@@ -1,4 +1,4 @@
-### vscode-debugger
+### vscode-dsl-debugger
 
 #### 1. 调试方式
 
