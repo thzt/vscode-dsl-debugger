@@ -1,33 +1,105 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import * as dap from '@vscode/debugadapter';
 import { DebugProtocol } from '@vscode/debugprotocol';
 
+import { Parser } from '../../dsl-parser';
+import { Interpreter } from '../../dsl-interpreter';
+
 export const activate = (context: vscode.ExtensionContext) => {
+  const filePath = vscode.window.activeTextEditor.document.fileName;
+
   context.subscriptions.push(
     vscode.debug.registerDebugAdapterDescriptorFactory(
       'dsl',
-      new Factory(),
+      new Factory(filePath),
     )
   );
 };
 
 class Factory implements vscode.DebugAdapterDescriptorFactory {
+  constructor(private filePath: string) { }
+
   createDebugAdapterDescriptor(session: vscode.DebugSession, executable: vscode.DebugAdapterExecutable): vscode.ProviderResult<vscode.DebugAdapterDescriptor> {
-    return new vscode.DebugAdapterInlineImplementation(new Session());
+    return new vscode.DebugAdapterInlineImplementation(new Session(this.filePath));
+  }
+}
+
+class Runtime {
+  private code: string;
+  private generator: any;
+  private line: number; // 从 1 开始
+  private interpreterEvent: any;
+
+  constructor(private filePath: string) { }
+
+  private static computeLineFromOffset(code, pos) {
+    return code.slice(0, pos).split('\n').length;
+  }
+
+  public start() {
+    const fileContent = fs.readFileSync(this.filePath, 'utf-8');
+    this.code = fileContent;
+
+    const parser = new Parser(this.code);
+    const ast = parser.parse();
+
+    const interpreter = new Interpreter(ast);
+    const generator = interpreter.eval();
+
+    this.generator = generator;
+
+    // 开始执行到第一个 yield
+    this.interpreterEvent = this.generator.next();
+    this.line = Runtime.computeLineFromOffset(this.code, this.interpreterEvent.value.pos);
+  }
+
+  public getRuntimeState() {
+    const { env } = this.interpreterEvent.value;
+
+    return {
+      filePath: this.filePath,
+      line: this.line,
+      env,
+    };
+  }
+
+  public stepOver() {
+    while (true) {
+      this.interpreterEvent = this.generator.next();
+      const {
+        done,
+        value: {
+          env,
+          pos,
+        }
+      } = this.interpreterEvent;
+      if (done) {
+        debugger
+        break;
+      }
+      if (pos == null) {
+        continue;
+      }
+      const line = Runtime.computeLineFromOffset(this.code, pos);
+      if (line > this.line) {
+        this.line = line;
+        break;
+      }
+    }
   }
 }
 
 class Session extends dap.LoggingDebugSession {
   private static threadId = 1;
+  private runtime: any;
+  private handlers = new dap.Handles<'locals' | 'globals'>();
 
-  private handlers = new dap.Handles<'locals' | 'globals' | 'test'>();
+  public constructor(private filePath: string) {
+    super();
 
-  // 当前执行到的行数，为了模拟 step over 效果
-  private line: number = 1;
-
-  public constructor() {
-    super('file.name');
+    this.runtime = new Runtime(filePath);
   }
 
   // ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
@@ -38,7 +110,7 @@ class Session extends dap.LoggingDebugSession {
 
   // 1. 初始化
   protected initializeRequest(response: DebugProtocol.InitializeResponse, args: DebugProtocol.InitializeRequestArguments): void {
-    // debugger;
+    this.runtime.start();
     this.sendResponse(response);
     this.sendEvent(new dap.InitializedEvent());
   }
@@ -56,8 +128,7 @@ class Session extends dap.LoggingDebugSession {
     // debugger;
     response.body = {
       threads: [
-        new dap.Thread(Session.threadId, 'thread 1'),
-        new dap.Thread(Session.threadId + 1, 'thread 2'),  // 为了表明可以有多个调试进程
+        new dap.Thread(Session.threadId, 'thread'),
       ],
     };
     this.sendResponse(response);
@@ -65,33 +136,22 @@ class Session extends dap.LoggingDebugSession {
   // 4. 获取给定进程的 调用栈帧
   protected stackTraceRequest(response: DebugProtocol.StackTraceResponse, args: DebugProtocol.StackTraceArguments, request?: DebugProtocol.Request): void {
     // debugger;
-    const readmeFilePath = path.resolve(__dirname, '../sampleWorkspace/readme.dsl');
-    const callerFilePath = path.resolve(__dirname, '../sampleWorkspace/caller.dsl');
+    const { filePath, line } = this.runtime.getRuntimeState();
 
     response.body = {
       stackFrames: [
         new dap.StackFrame(
           0,  // 栈帧的 id
-          'frame1.name',  // 栈帧的名字
+          'FrameName',  // 栈帧的名字
           new dap.Source(
             'readme.dsl',
-            readmeFilePath,
+            filePath,
           ),
-          this.line++,  // 第一行（刚开始在第一行）
+          line,  // 这里从 1 开始计数
           1,  // 第一列
         ),
-        new dap.StackFrame(  // 表明可以从别的文件调用过来
-          1,
-          'frame2.name',
-          new dap.Source(
-            'caller.dsl',
-            callerFilePath,
-          ),
-          3,
-          1,
-        ),
       ],
-      totalFrames: 2,
+      totalFrames: 1,
     };
     this.sendResponse(response);
   }
@@ -112,21 +172,25 @@ class Session extends dap.LoggingDebugSession {
   }
   // 6. 获取不同栈帧分类的变量，这里拿不到栈帧信息，只有分类信息
   protected variablesRequest(response: DebugProtocol.VariablesResponse, args: DebugProtocol.VariablesArguments, request?: DebugProtocol.Request): void {
+    const { env } = this.runtime.getRuntimeState();
+
     // debugger;
     switch (this.handlers.get(args.variablesReference)) {
       case 'locals': {
+        const lastFrame = env[env.length - 1];
+        const variables = [...lastFrame.keys()].map(prop => {
+          const value = lastFrame.get(prop);
+          return new dap.Variable(prop, value.toString());
+        });
+
         response.body = {
-          variables: [
-            new dap.Variable('a', '1')
-          ]
+          variables,
         }
         break;
       }
       case 'globals': {
         response.body = {
-          variables: [
-            new dap.Variable('b', '2')
-          ]
+          variables: [],
         }
         break;
       }
@@ -139,6 +203,7 @@ class Session extends dap.LoggingDebugSession {
 
   protected nextRequest(response: DebugProtocol.NextResponse, args: DebugProtocol.NextArguments, request?: DebugProtocol.Request): void {
     // debugger;
+    this.runtime.stepOver();
     this.sendResponse(response);
     this.sendEvent(new dap.StoppedEvent('step', Session.threadId));  // 需要发送停止事件，不然不会停住
 

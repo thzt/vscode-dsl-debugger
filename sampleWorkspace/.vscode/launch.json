@@ -8,7 +8,7 @@
       "name": "Debug",
       "type": "dsl",
       "request": "launch",
-      "program": "${workspaceFolder}/readme.dsl",
+      "program": "${workspaceFolder}/demo.dsl",
       "stopOnEntry": true
     }
   ]

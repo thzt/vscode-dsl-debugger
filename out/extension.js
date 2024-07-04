@@ -1,24 +1,76 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.activate = void 0;
-const path = require("path");
+const fs = require("fs");
 const vscode = require("vscode");
 const dap = require("@vscode/debugadapter");
+const dsl_parser_1 = require("../../dsl-parser");
+const dsl_interpreter_1 = require("../../dsl-interpreter");
 const activate = (context) => {
-    context.subscriptions.push(vscode.debug.registerDebugAdapterDescriptorFactory('dsl', new Factory()));
+    const filePath = vscode.window.activeTextEditor.document.fileName;
+    context.subscriptions.push(vscode.debug.registerDebugAdapterDescriptorFactory('dsl', new Factory(filePath)));
 };
 exports.activate = activate;
 class Factory {
+    constructor(filePath) {
+        this.filePath = filePath;
+    }
     createDebugAdapterDescriptor(session, executable) {
-        return new vscode.DebugAdapterInlineImplementation(new Session());
+        return new vscode.DebugAdapterInlineImplementation(new Session(this.filePath));
+    }
+}
+class Runtime {
+    constructor(filePath) {
+        this.filePath = filePath;
+    }
+    static computeLineFromOffset(code, pos) {
+        return code.slice(0, pos).split('\n').length;
+    }
+    start() {
+        const fileContent = fs.readFileSync(this.filePath, 'utf-8');
+        this.code = fileContent;
+        const parser = new dsl_parser_1.Parser(this.code);
+        const ast = parser.parse();
+        const interpreter = new dsl_interpreter_1.Interpreter(ast);
+        const generator = interpreter.eval();
+        this.generator = generator;
+        // 开始执行到第一个 yield
+        this.interpreterEvent = this.generator.next();
+        this.line = Runtime.computeLineFromOffset(this.code, this.interpreterEvent.value.pos);
+    }
+    getRuntimeState() {
+        const { env } = this.interpreterEvent.value;
+        return {
+            filePath: this.filePath,
+            line: this.line,
+            env,
+        };
+    }
+    stepOver() {
+        while (true) {
+            this.interpreterEvent = this.generator.next();
+            const { done, value: { env, pos, } } = this.interpreterEvent;
+            if (done) {
+                debugger;
+                break;
+            }
+            if (pos == null) {
+                continue;
+            }
+            const line = Runtime.computeLineFromOffset(this.code, pos);
+            if (line > this.line) {
+                this.line = line;
+                break;
+            }
+        }
     }
 }
 class Session extends dap.LoggingDebugSession {
-    constructor() {
-        super('file.name');
+    constructor(filePath) {
+        super();
+        this.filePath = filePath;
         this.handlers = new dap.Handles();
-        // 当前执行到的行数，为了模拟 step over 效果
-        this.line = 1;
+        this.runtime = new Runtime(filePath);
     }
     // ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
     // DAP 事件
@@ -26,7 +78,7 @@ class Session extends dap.LoggingDebugSession {
     // 点击进行调试
     // 1. 初始化
     initializeRequest(response, args) {
-        // debugger;
+        this.runtime.start();
         this.sendResponse(response);
         this.sendEvent(new dap.InitializedEvent());
     }
@@ -43,8 +95,7 @@ class Session extends dap.LoggingDebugSession {
         // debugger;
         response.body = {
             threads: [
-                new dap.Thread(Session.threadId, 'thread 1'),
-                new dap.Thread(Session.threadId + 1, 'thread 2'), // 为了表明可以有多个调试进程
+                new dap.Thread(Session.threadId, 'thread'),
             ],
         };
         this.sendResponse(response);
@@ -52,18 +103,15 @@ class Session extends dap.LoggingDebugSession {
     // 4. 获取给定进程的 调用栈帧
     stackTraceRequest(response, args, request) {
         // debugger;
-        const readmeFilePath = path.resolve(__dirname, '../sampleWorkspace/readme.dsl');
-        const callerFilePath = path.resolve(__dirname, '../sampleWorkspace/caller.dsl');
+        const { filePath, line } = this.runtime.getRuntimeState();
         response.body = {
             stackFrames: [
                 new dap.StackFrame(0, // 栈帧的 id
-                'frame1.name', // 栈帧的名字
-                new dap.Source('readme.dsl', readmeFilePath), this.line++, // 第一行（刚开始在第一行）
+                'FrameName', // 栈帧的名字
+                new dap.Source('readme.dsl', filePath), line, // 这里从 1 开始计数
                 1),
-                new dap.StackFrame(// 表明可以从别的文件调用过来
-                1, 'frame2.name', new dap.Source('caller.dsl', callerFilePath), 3, 1),
             ],
-            totalFrames: 2,
+            totalFrames: 1,
         };
         this.sendResponse(response);
     }
@@ -83,21 +131,23 @@ class Session extends dap.LoggingDebugSession {
     }
     // 6. 获取不同栈帧分类的变量，这里拿不到栈帧信息，只有分类信息
     variablesRequest(response, args, request) {
+        const { env } = this.runtime.getRuntimeState();
         // debugger;
         switch (this.handlers.get(args.variablesReference)) {
             case 'locals': {
+                const lastFrame = env[env.length - 1];
+                const variables = [...lastFrame.keys()].map(prop => {
+                    const value = lastFrame.get(prop);
+                    return new dap.Variable(prop, value.toString());
+                });
                 response.body = {
-                    variables: [
-                        new dap.Variable('a', '1')
-                    ]
+                    variables,
                 };
                 break;
             }
             case 'globals': {
                 response.body = {
-                    variables: [
-                        new dap.Variable('b', '2')
-                    ]
+                    variables: [],
                 };
                 break;
             }
@@ -108,6 +158,7 @@ class Session extends dap.LoggingDebugSession {
     // 下一步 Stop Over
     nextRequest(response, args, request) {
         // debugger;
+        this.runtime.stepOver();
         this.sendResponse(response);
         this.sendEvent(new dap.StoppedEvent('step', Session.threadId)); // 需要发送停止事件，不然不会停住
         // 会再次按顺序调用
