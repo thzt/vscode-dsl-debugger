@@ -5,7 +5,7 @@ import * as dap from '@vscode/debugadapter';
 import { DebugProtocol } from '@vscode/debugprotocol';
 
 import { Parser } from '../../dsl-parser';
-import { Interpreter } from '../../dsl-interpreter';
+import { Interpreter, EventNameEnum } from '../../dsl-interpreter';
 
 export const activate = (context: vscode.ExtensionContext) => {
   const filePath = vscode.window.activeTextEditor.document.fileName;
@@ -38,6 +38,16 @@ class Runtime {
     return code.slice(0, pos).split('\n').length;
   }
 
+  public getRuntimeState() {
+    const { env } = this.interpreterEvent.value;
+
+    return {
+      filePath: this.filePath,
+      line: this.line,
+      env,
+    };
+  }
+
   public start() {
     const fileContent = fs.readFileSync(this.filePath, 'utf-8');
     this.code = fileContent;
@@ -55,28 +65,18 @@ class Runtime {
     this.line = Runtime.computeLineFromOffset(this.code, this.interpreterEvent.value.pos);
   }
 
-  public getRuntimeState() {
-    const { env } = this.interpreterEvent.value;
-
-    return {
-      filePath: this.filePath,
-      line: this.line,
-      env,
-    };
-  }
-
   public stepOver() {
     while (true) {
       this.interpreterEvent = this.generator.next();
       const {
         done,
         value: {
+          eventName,
           env,
           pos,
         }
       } = this.interpreterEvent;
       if (done) {
-        debugger
         break;
       }
       if (pos == null) {
@@ -89,12 +89,32 @@ class Runtime {
       }
     }
   }
+
+  public stepIn() {
+    while (true) {
+      this.interpreterEvent = this.generator.next();
+      const {
+        done,
+        value: {
+          eventName,
+          env,
+          pos,
+        },
+      } = this.interpreterEvent;
+      if (eventName === EventNameEnum.StartEvalFunctionBody) {
+        const line = Runtime.computeLineFromOffset(this.code, pos);
+        this.line = line;
+        break;
+      }
+    }
+
+  }
 }
 
 class Session extends dap.LoggingDebugSession {
   private static threadId = 1;
   private runtime: any;
-  private handlers = new dap.Handles<'locals' | 'globals'>();
+  private handlers = new dap.Handles<string>();
 
   public constructor(private filePath: string) {
     super();
@@ -159,42 +179,41 @@ class Session extends dap.LoggingDebugSession {
   protected scopesRequest(response: DebugProtocol.ScopesResponse, args: DebugProtocol.ScopesArguments, request?: DebugProtocol.Request): void {
     // 不同栈帧 args.frameId 可以有不同的分类，但一般为相同的分类
     // debugger;
-    const localScopeReference = this.handlers.create('locals');
-    const globalScopeReference = this.handlers.create('globals');
+    const { env } = this.runtime.getRuntimeState();
+    const scopes = env.map((frame, index) => {
+      const frameName = `frame-${index}`;
+
+      const scopeReference = this.handlers.create(frameName);
+      const scope = new dap.Scope(frameName, scopeReference, false);
+      return scope;
+    });
 
     response.body = {
-      scopes: [
-        new dap.Scope('Locals', localScopeReference, false),
-        new dap.Scope('Globals', globalScopeReference, true), // expensive:true 则默认不展开（展开才获取变量 variablesRequest）
-      ],
+      scopes,
     };
     this.sendResponse(response);
   }
   // 6. 获取不同栈帧分类的变量，这里拿不到栈帧信息，只有分类信息
   protected variablesRequest(response: DebugProtocol.VariablesResponse, args: DebugProtocol.VariablesArguments, request?: DebugProtocol.Request): void {
     const { env } = this.runtime.getRuntimeState();
+    const frameName = this.handlers.get(args.variablesReference);
 
-    // debugger;
-    switch (this.handlers.get(args.variablesReference)) {
-      case 'locals': {
-        const lastFrame = env[env.length - 1];
-        const variables = [...lastFrame.keys()].map(prop => {
-          const value = lastFrame.get(prop);
-          return new dap.Variable(prop, value.toString());
-        });
-
-        response.body = {
-          variables,
-        }
-        break;
-      }
-      case 'globals': {
-        response.body = {
-          variables: [],
-        }
-        break;
-      }
+    const match = /^frame-([0-9]+?)$/.exec(frameName);
+    if (match == null) {
+      throw new Error(`不正确的 frame 名字：${frameName}`);
     }
+    const [, frameIndex] = match;
+
+    const frame = env[frameIndex];
+    const variables = [...frame.keys()].map(prop => {
+      const value = frame.get(prop);
+      return new dap.Variable(prop, value.toString());
+    });
+
+    response.body = {
+      variables,
+    }
+
     this.sendResponse(response);
   }
 
@@ -212,5 +231,15 @@ class Session extends dap.LoggingDebugSession {
     // 获取栈帧：stackTraceRequest
     // 获取作用域：scopesRequest
     // 获取变量：variablesRequest
+  }
+
+  // ---- ---- ---- ---- ---- ----
+  // 下一步 Stop In
+
+  protected stepInRequest(response: DebugProtocol.StepInResponse, args: DebugProtocol.StepInArguments, request?: DebugProtocol.Request): void {
+    // debugger;
+    this.runtime.stepIn();
+    this.sendResponse(response);
+    this.sendEvent(new dap.StoppedEvent('step', Session.threadId));
   }
 }
