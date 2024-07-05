@@ -189,7 +189,7 @@ class Session extends dap.LoggingDebugSession {
     });
 
     response.body = {
-      scopes,
+      scopes: scopes.reverse(),  // 倒序展示，将本地变量展示在最上面
     };
     this.sendResponse(response);
   }
